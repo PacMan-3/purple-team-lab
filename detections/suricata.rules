@@ -1,0 +1,38 @@
+# ============================================================
+# Purple Team Home Lab — Custom Suricata Rules
+# Local rule file: /etc/suricata/rules/local.rules
+# SIDs in the 9000000+ range are reserved for local/custom rules.
+# ============================================================
+
+# --- Scenario 2: SSH Brute Force (T1110.001) ---
+alert tcp any any -> $HOME_NET 22 (msg:"LOCAL Possible SSH Brute Force - High Connection Rate"; \
+    flow:to_server; flags:S; threshold:type both, track by_src, count 15, seconds 60; \
+    classtype:attempted-recon; sid:9000001; rev:1;)
+
+# --- Scenario 3: vsftpd 2.3.4 Backdoor (T1190 / CVE-2011-2523) ---
+alert tcp any any -> $HOME_NET 6200 (msg:"LOCAL vsftpd 2.3.4 Backdoor Shell Connection Detected"; \
+    flow:to_server,established; classtype:successful-admin; sid:9000002; rev:1;)
+
+alert tcp any any -> $HOME_NET 21 (msg:"LOCAL FTP Login String Matches Known vsftpd Backdoor Trigger"; \
+    flow:to_server; content:"USER"; nocase; content:"|3A 29|"; distance:0; \
+    classtype:attempted-admin; sid:9000003; rev:1;)
+
+# --- Scenario 4: C2 / Meterpreter-style Reverse Shell Handshake (T1071) ---
+# 4444/tcp is the well-known default listener port for Metasploit's
+# multi/handler — its appearance in traffic is a strong, low-noise
+# indicator in a lab context (real engagements use randomized ports,
+# so pair this with the Zeek beaconing heuristic in Splunk query 4).
+alert tcp $HOME_NET any -> any 4444 (msg:"LOCAL Outbound Connection to Default Metasploit Handler Port"; \
+    flow:to_server,established; classtype:trojan-activity; sid:9000004; rev:1;)
+
+# --- Scenario 5: Large Outbound HTTP POST (possible exfiltration, T1041) ---
+# Suricata's dsize keyword only reliably measures the whole packet, not
+# an HTTP sticky buffer, so payload-size filtering for this scenario is
+# left to the Zeek/Splunk detection (query 5, on request_body_len).
+# This rule instead flags outbound POSTs at all, as a lightweight
+# tripwire to cross-reference against the size-based Splunk alert.
+alert http $HOME_NET any -> any any (msg:"LOCAL Outbound HTTP POST - Review Against Size-Based Alert"; \
+    flow:to_server,established; http.method; content:"POST"; \
+    classtype:policy-violation; sid:9000005; rev:1;)
+
+# ============================================================

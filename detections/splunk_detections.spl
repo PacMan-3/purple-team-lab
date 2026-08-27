@@ -1,0 +1,58 @@
+// ============================================================
+// Purple Team Home Lab — Splunk Detection Queries
+// Index assumed: zeek (conn.log, http.log, notice.log via Zeek TA)
+// Adjust index/sourcetype names to match your own Splunk setup.
+// ============================================================
+
+// --------------------------------------------------------------
+// Query 1 — Scenario 1: Network Service Scanning (T1046)
+// Flags a source touching an unusually high number of distinct
+// destination ports on one host within a short window.
+// --------------------------------------------------------------
+index=zeek sourcetype=zeek_conn
+| bin _time span=1m
+| stats dc(id.resp_p) AS distinct_ports values(id.resp_p) AS ports_touched
+    by _time id.orig_h id.resp_h
+| where distinct_ports > 20
+| sort - distinct_ports
+
+// --------------------------------------------------------------
+// Query 2 — Scenario 2: SSH Brute Force (T1110.001)
+// Counts SSH connection attempts per source/destination per minute.
+// --------------------------------------------------------------
+index=zeek sourcetype=zeek_conn id.resp_p=22
+| bin _time span=1m
+| stats count AS attempts by _time id.orig_h id.resp_h
+| where attempts > 15
+| sort - attempts
+
+// --------------------------------------------------------------
+// Query 3 — Scenario 3: vsftpd 2.3.4 Backdoor Exploitation (T1190)
+// Flags any connection to the known backdoor port 6200, and any
+// Zeek notice tagged for the FTP backdoor signature.
+// --------------------------------------------------------------
+index=zeek sourcetype=zeek_conn id.resp_p=6200
+| table _time id.orig_h id.resp_h id.resp_p proto
+
+index=zeek sourcetype=zeek_notice note="*Backdoor*"
+| table _time id.orig_h id.resp_h note msg
+
+// --------------------------------------------------------------
+// Query 4 — Scenario 4: C2 Callback Behavior (T1071)
+// Flags long-lived, low-volume connections — a rough beacon
+// heuristic based on duration vs. bytes transferred.
+// --------------------------------------------------------------
+index=zeek sourcetype=zeek_conn
+| eval bytes_total = orig_bytes + resp_bytes
+| where duration > 120 AND bytes_total < 5000
+| table _time id.orig_h id.resp_h duration bytes_total service
+
+// --------------------------------------------------------------
+// Query 5 — Scenario 5: Data Exfiltration over HTTP (T1041)
+// Flags large outbound HTTP POST requests from a host with no
+// established baseline of outbound HTTP traffic.
+// --------------------------------------------------------------
+index=zeek sourcetype=zeek_http method=POST
+| where request_body_len > 500000
+| table _time id.orig_h id.resp_h host uri request_body_len
+// ============================================================
